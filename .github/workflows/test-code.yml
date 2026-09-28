@@ -1,0 +1,77 @@
+name: Test sample code
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gradle:
+    name: Gradle (${{ matrix.project }} / Java ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - ch02
+          - ch04
+          - ch05:antlr
+          - ch05:javacc
+          - ch05:jcomb
+          - ch05:peg2java
+        # 本書はJava 21を基準としつつJava 25での動作も保証したいので、両方で回す
+        java: ['21', '25']
+    defaults:
+      run:
+        working-directory: code
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: gradle
+      - name: Run tests
+        run: ./gradlew :${{ matrix.project }}:test --no-daemon
+
+  yacc:
+    name: yacc/flex (ch05/yacc)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Install bison, flex and byacc
+        # Makefileがyacc/flex/Cコンパイラに依存している。ubuntuのbisonには
+        # yaccコマンドが含まれないので、別途byacc（BSD yacc）を入れる
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bison flex byacc
+      - name: Run smoke test
+        run: ./gradlew :ch05:yacc:check --no-daemon
+
+  # ブランチ保護の必須チェックに指定するための集約ジョブ。
+  # 依存ジョブが失敗すると needs だけでは skipped になり、必須チェックを
+  # 素通りしてしまうので、always() で必ず実行して結果を明示的に確かめる
+  all-tests:
+    name: All tests
+    if: always()
+    needs: [gradle, yacc]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          test "${{ needs.gradle.result }}" = success
+          test "${{ needs.yacc.result }}" = success
